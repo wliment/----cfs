@@ -1,114 +1,183 @@
-//#include "thread_cfs.h"
-#include "rbtree_rc.h" //ºìºÚÊ÷ÊµÏÖ
+ï»¿#include "rbtree_rc.h" 
+#include "thread_cfs.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <pthread.h>
-
+#define random(x) (rand()%x)
 
 static pthread_mutex_t mtx = PTHREAD_MUTEX_INITIALIZER ;
 static pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
-pthread_t run_id=0;//¿ÉÔËĞĞÏß³ÌµÄid;
+pthread_t run_id=0;
 
-//ÔËĞĞÊµÌå,ÓÃÏß³ÌÄ£Äâ½ø³Ì,¼ÆËã·Æ²¨ÄÇÆõÊıÁĞ
-void thread(void){
+void *thread(int *n){
 		int a[3001]={};
 		int b[3001]={};
 		int c[3001]={};
-		int n=10000;
 		c[1]=2;
         b[1]=1;
-
-	for(int i=1;i<=n-2;i++)
+	for(int i=1;i<=*n-2;i++)
 	{   
 		pthread_mutex_lock(&mtx);
 		while(run_id!=pthread_self())
 		{
-			printf("thread 1 wait process \n");
+			//printf("thread %lu wait process \n",pthread_self());
 			pthread_cond_wait(&cond, &mtx);
 		}
-
+		
 		pthread_cond_broadcast(&cond);
 		pthread_mutex_unlock(&mtx);
+		
 		for(int j=1;j<=3000;j++)
 		{   
 			a[j]=b[j];
 			b[j]=c[j];
-			c[j]=0;}
-			for(int j=1;j<=3000;j++)
-			{c[j]=c[j]+a[j]+b[j];
-				if(c[j]>=10)
-				{c[j]=c[j]-10;
-					c[j+1]=1;}
-			}   
-			usleep(1);
+			c[j]=0;
+		}
+		for(int j=1;j<=3000;j++)
+		{
+			c[j]=c[j]+a[j]+b[j];
+			if(c[j]>=10)
+			{
+				c[j]=c[j]-10;
+				c[j+1]=1;
+			}
+		}   
+		usleep(1);
 	}  
 
 	int i=3000;
 	while(c[i]==0) i--;
 	for(i=i;i>=1;i--)
 		printf("%d",c[i]);
+	printf("thrad is finish%lu\n",pthread_self());
 	printf("\n");				
 
 
 }
 
-pthread_t thread1_id;
-void thread_test(void)
+void *main_thread(void)//ä¸»è°ƒåº¦çº¿ç¨‹
 {
-	for(int i=0;i<10;i++)
+
+
+
+
+}
+int init_thread(int n,struct thread_struct *thread_group) //åˆå§‹åŒ–æ‰€æœ‰çº¿ç¨‹,nä»£è¡¨çº¿ç¨‹æ•°ç›®
+{
+
+	struct thread_struct * pc;
+	for(int i=0;i<n-1;i++)
 	{
 
-		pthread_mutex_lock(&mtx);
-		while(run_id!=pthread_self())
-		{
-			printf("thread test  wait process \n");
-			pthread_cond_wait(&cond, &mtx);
-		}
+		pc = calloc(sizeof(struct thread_struct) , 1);
+		*(thread_group)=*pc;
+		thread_group->pid=1000;
+		thread_group++;
+	}
+	thread_group->pid=1;//ç¡®ä¿æœ€åä¸€ä¸ªå…ƒç´ ä¸º1
 
-		pthread_cond_broadcast(&cond);
-		pthread_mutex_unlock(&mtx);
-		printf("thread_test is working\n");
-		sleep(1);
+	return 0;
+}
+
+void ready_run_thread(struct thread_struct *ready_thread,int n) //å‡†å¤‡è¿è¡Œçº¿ç¨‹
+{
+	pthread_t id;	
+	while(ready_thread->pid != 1)
+	{		
+		int ret=pthread_create(&id,NULL,(void *) thread,&n);
+		if(ret!=0){
+			printf ("Create pthread error!\n");
+			exit (1);
+		}
+		ready_thread->pid=id;
+	//	printf("thread id is: %lu\n",ready_thread->pid);
+		ready_thread->se.key = random(10000);
+		ready_thread++;
+	}
+	
+}
+
+int insert_rb_tree(struct rb_root *tree_root,struct thread_struct *thread ) //æ’å…¥å•ä¸ªèŠ‚ç‚¹åˆ°çº¢é»‘æ ‘
+{
+		
+	struct rb_node **new= &(tree_root->rb_node);
+	struct rb_node *parent =0; 
+
+	while(*new)
+	{
+		struct sched_entity *this = rb_entry(*new, struct sched_entity, run_node);
+
+                int result =thread->se.key - this->key;
+
+                parent = *new;
+
+                if (result < 0)
+                        new = &((*new)->rb_left);
+                else if (result > 0)
+                        new = &((*new)->rb_right);
+                else
+                        return -1; // the key is already exists
 
 	}
-	run_id = thread1_id;
-	pthread_cond_broadcast(&cond);
+	rb_link_node(&(thread->se.run_node), parent, new);
+	rb_insert_color(&(thread->se.run_node),tree_root);
+
+}
+
+
+void insert_thread_group(struct rb_root *tree,struct thread_struct *thread_g)	
+{
+
+	while(thread_g->pid != 1)
+	{
+
+		insert_rb_tree(tree,thread_g);
+		thread_g++;
+	}
+}
+
+void wait_thread(struct thread_struct *thread_g)
+{
+
+	while(thread_g->pid !=1);
+	{
+		
+
+		pthread_join(thread_g->pid,NULL);
+		thread_g++;
+		printf("dffdfd\n");
+
+	}
+
 }
 int main(void)
 {
 	pthread_t id2,id3;
 	int ret;
 	int size = 100;
+	int n =100;
 	struct rb_root cfs_tree = RB_ROOT;
-	struct container * pc;
-	pc = calloc(sizeof(struct container) + size, 1);
-	strcat((char*)&pc->rb_data.data, "cfs better than o(1)");
+	struct thread_struct thread_group[21];
+ 
+	init_thread(21,thread_group);
 
-	ret=pthread_create(&id2,NULL,(void *) thread,NULL);
-	thread1_id=id2;
-	pc->rb_data.key=id2;
+ 	ready_run_thread(thread_group,n);
 
-	ret=container_insert(&cfs_tree,pc);
-	if(ret!=0){
-		printf ("Create pthread error!\n");
-		exit (1);
-	}
+	insert_thread_group(&cfs_tree,thread_group);
+	usleep(1);
+	run_id =thread_group[19].pid;
+	pthread_cond_broadcast(&cond);
+	sleep(2);
+	run_id =thread_group[18].pid;
+	pthread_cond_broadcast(&cond);	
 
-	pc = calloc(sizeof(struct container) + size, 1);
-	strcat((char*)&pc->rb_data.data, "cfs better than o(2)");
+	sleep(2);
+	run_id =thread_group[10].pid;
+	pthread_cond_broadcast(&cond);	
 
-	ret=pthread_create(&id3,NULL,(void *) thread_test,NULL);
-	pc->rb_data.key=id3;
-	ret=container_insert(&cfs_tree,pc);
-	if(ret!=0){
-		printf ("Create pthread error!\n");
-		exit (1);
-	}
-	run_id=id3;
-	pthread_join(id2,NULL);
-	pthread_join(id3,NULL);
+    wait_thread(thread_group); //ç­‰å¾…æ‰€æœ‰çº¿ç¨‹æ‰§è¡Œå®Œæˆ
 
 	return 0;
 }
