@@ -11,24 +11,27 @@ typedef long long u64;
         pthread_cond_broadcast(&cond);\
         pthread_mutex_unlock(&mtx);\
 
+struct load_weight {
+  unsigned long weight, inv_weight;
+};
 
 
-// struct cfs_rq  
-// {
-// 	struct load_weight load;
-// 	unsigned long nr_running, h_nr_running;
+struct cfs_rq  
+{
+	struct load_weight load;
+	unsigned long nr_running, h_nr_running;
 
-// 	u64 min_vruntime;
+	u64 min_vruntime;
 
-// 	struct rb_root tasks_timeline;
-// 	struct rb_node *rb_leftmost;
+	struct rb_root tasks_timeline;
+	struct rb_node *rb_leftmost;
 
-// 	struct list_head tasks;
-// 	struct list_head *balance_iterator;
+	// struct list_head tasks;
+	// struct list_head *balance_iterator;
 
-// 	struct sched_entity *curr, *next, *last, *skip;
+	struct sched_entity *curr, *next, *last, *skip;
 
-// };
+};
 
 
 struct sched_entity { 
@@ -37,6 +40,8 @@ struct sched_entity {
 	struct rb_node		run_node;
 	unsigned int		on_rq;  
   int key;
+  pthread_t pid;
+  int is_exit;
 	u64			exec_start;
 	u64			sum_exec_runtime;
 	u64			vruntime;
@@ -51,3 +56,4 @@ struct thread_struct {
 //struct sched_class *sched_class;
 
 };
+
