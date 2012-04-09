@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <time.h>
 #include <errno.h>
 #define random(x) (rand()%x)
 
@@ -34,15 +35,16 @@ struct cfs_rq *cfs; //等待进程队列
 
 void dequeue_entity( struct sched_entity *se);
 void enqueue_entity(struct sched_entity *se) ;
-
-void *thread(int *n){
+int pthread_kill(pthread_t thread, int sig);
+void *thread(int *nn){
 		int a[3001]={};
 		int b[3001]={};
 		int c[3001]={};
 		c[1]=2;
-        b[1]=1;
+		b[1]=1;
 		pthread_t self_id=pthread_self();       
-	for(int i=1;i<=(*n-2);i++)
+		int nm = *nn;
+	for(int i=1;i<=(nm-2);i++)
 	{   
 		pthread_mutex_lock(&mtx);
 	
@@ -79,7 +81,7 @@ void *thread(int *n){
 	for(i=i;i>=1;i--)
 		printf("%d",c[i]);
 	printf("\n");
-	printf("\nthread is finish: id is %lu    n is:%d \n",pthread_self(),*n);
+	printf("\nthread is finish: id is %lu    n is:%d \n",pthread_self(),nm);
 	// cfs->nr_running -=1;
 	printf("the left thread is: %d \n",(int)cfs->nr_running);
 
@@ -87,7 +89,7 @@ void *thread(int *n){
 }
 
 #define TIME_TICK 1000  //模拟多少时间，触发一次时钟中断,单位为微秒us
-int pthread_kill(pthread_t thread, int sig);
+
 int thread_is_alive(pthread_t pid) //判断线程是否死掉
 {
 
@@ -103,6 +105,7 @@ void *main_thread()//主调度线程
 {
 
 	struct sched_entity *curr  = rb_entry(cfs->rb_leftmost, struct sched_entity, run_node);
+	
 	struct sched_entity *left_node = curr;
 	dequeue_entity(curr); //出队运行
 	while(1)
@@ -110,14 +113,11 @@ void *main_thread()//主调度线程
 
 		left_node  = rb_entry(cfs->rb_leftmost, struct sched_entity, run_node);
 		if(left_node == 0)
-		{
-				left_node  = rb_entry(cfs->tasks_timeline.rb_node, struct sched_entity, run_node);
-		}
-		if(cfs->tasks_timeline.rb_node == 0)
 			break;
 
-		curr->key +=10;
-		// printf("mmmmmmmmmmmmmm:%d  %lu %d\n",cfs->nr_running,curr->pid,left_node);
+  // printf("mmmmmmmmmmmmmm:%lu\n ",curr->pid);
+		curr->key +=curr->setup;
+		
 	
 		if(left_node->key < curr->key)
 		{
@@ -134,17 +134,18 @@ void *main_thread()//主调度线程
 		}
 
 				
-		
+	
 		run_id =curr->pid;
 		pthread_cond_broadcast(&cond);
-		// pthread_cond_signal(&cond);
 
 		usleep(TIME_TICK*2);//模拟每隔1ms触发一次时钟中断
+
 	}
+
+printf("\n\n\nffffffffffffffffffffff %lu\n",run_id);
 	// curr = rb_entry(&cfs->tasks_timeline.rb_node, struct sched_entity, run_node);
 
 	pthread_join(curr->pid,NULL);
-printf("ddddddddddddddddddddd  %lu\n",run_id);
 	// run_id = curr->pid;
 	//  pthread_cond_broadcast(&cond);
 	
@@ -175,26 +176,42 @@ int init_thread(int n,struct thread_struct *thread_group) //初始化所有线�
 	return 0;
 }
 
+int cal_setup(unsigned int  weight) //优先级越高的走的越慢
+{
 
+  return   1000*1024/weight;
+
+}
 
 
 //初始化线程调度实体信息
 void init_thread_info(struct thread_struct *ready_thread,pthread_t id)
 {
+
 	ready_thread->pid = id;
 	ready_thread->se.is_exit = 0;
 	ready_thread->se.pid = id;
-	ready_thread->se.key=10000+random(3000);
+	ready_thread->se.static_prior=random(40);
+	ready_thread->se.weight = prio_to_weight[ready_thread->se.static_prior];
+	cfs->all_weight += ready_thread->se.weight;
+	ready_thread->se.setup = cal_setup(ready_thread->se.weight);
+	ready_thread->se.key=10000+random(311);
+	printf("bbbbbbbbbbbbbbbbbbbbbbbbbbb %2d %lu %lu %d %d\n",ready_thread->se.static_prior,id,ready_thread->se.weight,ready_thread->se.setup,ready_thread->se.key );
 }
 
 
 void ready_run_thread(struct thread_struct *ready_thread,int *n) //准备运行线程
 {
 	pthread_t id;	
+	srand((int)time(0));
+	// int *m=0;
 	while(ready_thread->pid != 1)
 	{	
-
-		int ret=pthread_create(&id,NULL,(void *)thread,n);
+		int *m=(int *)malloc(sizeof(int));
+		*m = random(1000)+1000 ;
+		printf("m is %d\n",*m);
+		printf("poiner m is %p\n",m);
+		int ret=pthread_create(&id,NULL,(void *)thread,m);
 		if(ret!=0){
 			printf ("Create pthread error!\n");
 			exit (1);
@@ -203,7 +220,7 @@ void ready_run_thread(struct thread_struct *ready_thread,int *n) //准备运行�
 		ready_thread++;
 
 	}
-	
+
 }
 
 	void dequeue_entity(struct sched_entity *se)
@@ -225,20 +242,19 @@ void ready_run_thread(struct thread_struct *ready_thread,int *n) //准备运行�
 //将调度实体插入红黑树，在插入过程中缓存最左边的节点
 void enqueue_entity(struct sched_entity *se ) //插入单个节点到红黑树
 {
-	struct rb_node **new= &(cfs->tasks_timeline.rb_node);
-	struct rb_node *parent =0;
+	struct rb_node **new= &cfs->tasks_timeline.rb_node;
+	struct rb_node *parent =NULL;
 	struct sched_entity *this;
 	int leftmost = 1;
 
 	while(*new)
 	{
 		parent = *new;
-		this = rb_entry(*new, struct sched_entity, run_node);
+		this = rb_entry(parent, struct sched_entity, run_node);
 
-		int result =se->key - this->key;
-		
 
-		if (result < 0){
+		if ( (se->key - this->key) < 0  )
+		{
 			new = &parent->rb_left;
 		}
 		else 
@@ -247,14 +263,13 @@ void enqueue_entity(struct sched_entity *se ) //插入单个节点到红黑树
 			leftmost = 0; 
 		}
 
-// printf("hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh\n");
 	}
 
 	if (leftmost)
-		cfs->rb_leftmost = &this->run_node;
+		cfs->rb_leftmost = &se->run_node;
 
-	rb_link_node(&(se->run_node), parent, new);
-	rb_insert_color(&(se->run_node),&cfs->tasks_timeline);
+	rb_link_node(&se->run_node, parent, new);
+	rb_insert_color(&se->run_node,&cfs->tasks_timeline);
 	inc_nr_running();
 }
 
@@ -271,19 +286,19 @@ void insert_thread_group(struct thread_struct *thread_g)
 	}
 }
 
-void wait_thread(struct thread_struct *thread_g)
-{
-	while(thread_g->pid !=1);
-	{
+// void wait_thread(struct thread_struct *thread_g)
+// {
+// 	while(thread_g->pid !=1);
+// 	{
 
-		pthread_join(thread_g->pid,NULL);
-		thread_g++;
-		printf("sdfsfsdfsfdsfsdfsfds\n");
+// 		pthread_join(thread_g->pid,NULL);
+// 		thread_g++;
+// 		printf("sdfsfsdfsfdsfsdfsfds\n");
 
-	}
+// 	}
 
 
-}
+// }
 
 void init_cfs_rq()  
 {
@@ -301,19 +316,20 @@ int main(void)
 	struct cfs_rq cfs_run;
 	cfs=&cfs_run;
 	cfs->tasks_timeline = RB_ROOT;
+	cfs->all_weight =0;
 	struct rb_root *cfs_tree= &cfs->tasks_timeline;
-	struct thread_struct thread_group[25];
+	struct thread_struct thread_group[10];
 
 	cfs->nr_running=0; //队列初始化数量
 
-	init_thread(25,thread_group);
+	init_thread(10,thread_group);
 
 
 	ready_run_thread(thread_group,&n);
 
 	insert_thread_group(thread_group);
+	sleep(2);
 
-// sleep(1);
 
 	 ret=pthread_create(&sched_id,NULL,(void *)main_thread,NULL); //初始化调度线程
 		if(ret!=0){
@@ -328,9 +344,8 @@ int main(void)
 	// sleep(5);
 	// struct sched_entity *that  = rb_entry(cfs->rb_leftmost, struct sched_entity, run_node);
 	// printf("bbbbbbbbbbbbbbbbb: %d\n",that->key);
-     // wait_thread(thread_group); //等待所有线程执行完成
+	// wait_thread(thread_group); //等待所有线程执行完成
    pthread_join(sched_id,NULL);
 
 printf("zzzzzzzzzzzzzzzzzzzzz  %lu \n",run_id);
-// sleep(10);
 }

@@ -18,7 +18,7 @@ struct load_weight {
 
 struct cfs_rq  
 {
-	struct load_weight load;
+	unsigned long all_weight;
 	unsigned long nr_running, h_nr_running;
 
 	u64 min_vruntime;
@@ -42,6 +42,9 @@ struct sched_entity {
   int key;
   pthread_t pid;
   int is_exit;
+  int static_prior;
+  int setup;
+  unsigned long weight;
 	u64			exec_start;
 	u64			sum_exec_runtime;
 	u64			vruntime;
