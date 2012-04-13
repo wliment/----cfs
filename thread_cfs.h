@@ -3,7 +3,16 @@
 
 #include <pthread.h>
 #include <stddef.h>
-typedef long long u64;
+
+typedef unsigned char   u8;
+typedef unsigned short  u16;
+typedef unsigned int    u32;
+typedef unsigned long long  u64;
+typedef signed char   s8;
+typedef short     s16;
+typedef int     s32;
+typedef long long   s64;
+
 #define run_body(id) \
   pthread_mutex_lock(&mtx);\
         while(x!=0)\
@@ -11,6 +20,26 @@ typedef long long u64;
         pthread_cond_broadcast(&cond);\
         pthread_mutex_unlock(&mtx);\
 
+#define min(x, y) ({        \
+  typeof(x) _min1 = (x);      \
+  typeof(y) _min2 = (y);      \
+  (void) (&_min1 == &_min2);    \
+  _min1 < _min2 ? _min1 : _min2; })
+
+#define max(x, y) ({        \
+  typeof(x) _max1 = (x);      \
+  typeof(y) _max2 = (y);      \
+  (void) (&_max1 == &_max2);    \
+  _max1 > _max2 ? _max1 : _max2; })
+
+#define SCHED_LOAD_RESOLUTION  0
+#define scale_load(w)    (w)
+#define scale_load_down(w) (w)
+#define   likely(x)               __builtin_expect(!!(x),   1) 
+#define   unlikely(x)           __builtin_expect(!!(x),   0) 
+#define WMULT_CONST (~0UL) 
+#define WMULT_SHIFT  32 
+#define LONG_MAX  ((long)(~0UL>>1))
 struct load_weight {
   unsigned long weight, inv_weight;
 };
@@ -20,8 +49,9 @@ struct cfs_rq
 {
 	unsigned long all_weight;
 	unsigned long nr_running, h_nr_running;
-
+  struct load_weight  load;
 	u64 min_vruntime;
+  u64 clock;
 
 	struct rb_root tasks_timeline;
 	struct rb_node *rb_leftmost;
@@ -36,13 +66,13 @@ struct cfs_rq
 
 struct sched_entity { 
 
-	//struct load_weight	load;		/* for load-balancing */
+	struct load_weight	load;		/* for load-balancing */
 	struct rb_node		run_node;
 	unsigned int		on_rq;  
   int key;
   pthread_t pid;
   int is_exit;
-  int static_prior;
+  int static_prio;
   int setup;
   unsigned long weight;
 	u64			exec_start;

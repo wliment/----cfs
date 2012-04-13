@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <sys/time.h>
 #include <time.h>
 #include <errno.h>
 #define random(x) (rand()%x)
@@ -21,6 +22,20 @@ static const int prio_to_weight[40] = {
  /*  15 */        36,        29,        23,        18,        15,
 };
 
+//方便运算 2^x/prio_to_weight
+static const u32 prio_to_wmult[40] = {  
+ /* -20 */     48388,     59856,     76040,     92818,    118348,
+ /* -15 */    147320,    184698,    229616,    287308,    360437,
+ /* -10 */    449829,    563644,    704093,    875809,   1099582,
+ /*  -5 */   1376151,   1717300,   2157191,   2708050,   3363326,
+ /*   0 */   4194304,   5237765,   6557202,   8165337,  10153587,
+ /*   5 */  12820798,  15790321,  19976592,  24970740,  31350126,
+ /*  10 */  39045157,  49367440,  61356676,  76695844,  95443717,
+ /*  15 */ 119304647, 148102320, 186737708, 238609294, 286331153,
+};
+
+
+
 #define MAX_USER_RT_PRIO	100  //最大用户实时优先级
 #define MAX_RT_PRIO		MAX_USER_RT_PRIO
 #define NICE_0_LOAD		1024
@@ -30,12 +45,40 @@ static const int prio_to_weight[40] = {
 
 static pthread_mutex_t mtx = PTHREAD_MUTEX_INITIALIZER ;
 static pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
+
+unsigned int sysctl_sched_latency = 6000ULL; //单位微秒,最小调度周期6ms
+unsigned int normalized_sysctl_sched_latency = 6000UL;
+unsigned int sysctl_sched_min_granularity = 750ULL;
+unsigned int normalized_sysctl_sched_min_granularity = 750ULL;
+static unsigned int sched_nr_latency = 8;
+
 pthread_t run_id=0;
 struct cfs_rq *cfs; //等待进程队列
 
 void dequeue_entity( struct sched_entity *se);
 void enqueue_entity(struct sched_entity *se) ;
 int pthread_kill(pthread_t thread, int sig);
+static void place_entity(struct sched_entity *se, int initial);
+
+static void set_load_weight(struct thread_struct *p)
+{
+	int prio = p->se.static_prio - MAX_RT_PRIO;
+	prio=0;
+	struct load_weight *load = &p->se.load;
+
+	/*
+	 * SCHED_IDLE tasks get minimal weight:
+	 */
+	// if (p->policy == SCHED_IDLE) {
+	// 	load->weight = scale_load(WEIGHT_IDLEPRIO);
+	// 	load->inv_weight = WMULT_IDLEPRIO;
+	// 	return;
+	// }
+
+	load->weight = scale_load(prio_to_weight[prio]);
+	load->inv_weight = prio_to_wmult[prio];
+}
+
 void *thread(int *nn){
 		int a[3001]={};
 		int b[3001]={};
@@ -85,6 +128,8 @@ void *thread(int *nn){
 	// cfs->nr_running -=1;
 	printf("the left thread is: %d \n",(int)cfs->nr_running);
 
+	free(nn);
+
 
 }
 
@@ -99,37 +144,201 @@ int thread_is_alive(pthread_t pid) //判断线程是否死掉
 
 }
 
-
-
-void *main_thread()//主调度线程
+static void update_cfsrq_clock()//更新队列信息
 {
+	struct timeval now; 
 
+	gettimeofday(&now, NULL);
+	cfs->clock=((u64)(now.tv_sec))*1000000+now.tv_usec;
+	// printf("\nclock is:%llu\n\n\n",cfs->clock);
+
+}
+
+static inline int entity_before(struct sched_entity *a,
+				struct sched_entity *b)
+{
+	return (s64)(a->vruntime - b->vruntime) < 0;
+}
+
+#define SRR(x, y) (((x) + (1UL << ((y) - 1))) >> (y))
+static unsigned long
+calc_delta_mine(unsigned long delta_exec, unsigned long weight, struct load_weight *lw)
+{
+	u64 tmp;
+	// printf("zzzzzzzzzzzzzz: delta_exec  %lu * weight: %lu /lw->weight: %lu = %lu\n",delta_exec,weight,lw->weight,delta_exec * weight / lw->weight);
+	return delta_exec * weight / lw->weight;
+	if (likely(weight > (1UL << SCHED_LOAD_RESOLUTION)))
+		tmp = (u64)delta_exec * scale_load_down(weight);
+	else
+		tmp = (u64)delta_exec;
+		// printf("ppppppppppppppppp  %d %llu\n",cfs->nr_running,tmp);	
+	if (unlikely(tmp > WMULT_CONST))
+		tmp = SRR(SRR(tmp, WMULT_SHIFT/2) * lw->inv_weight, WMULT_SHIFT/2);
+	else
+		tmp = SRR(tmp * lw->inv_weight, WMULT_SHIFT);
+		// printf("wwwwwwwwwwwwwwwww   %llu\n",tmp);	
+	return (unsigned long)min(tmp, (u64)(unsigned long)LONG_MAX);
+}
+
+
+static inline unsigned long
+calc_delta_fair(unsigned long delta, struct sched_entity *se) //计算虚拟时钟增加的量
+{
+// printf("nnnnnnnnnnnnnnnnn   %lu\n",delta);
+	if (unlikely(se->load.weight != NICE_0_LOAD))
+
+		delta = calc_delta_mine(delta, NICE_0_LOAD, &se->load);
+// printf("nnnnnnnnnnnnnnnnn   %lu\n",delta);
+return delta;
+}
+
+static u64 __sched_period(unsigned long nr_running) //计算调度周期更具队列上的线程数
+{
+	u64 period = sysctl_sched_latency;
+	unsigned long nr_latency = sched_nr_latency;
+
+	if (unlikely(nr_running > nr_latency)) {
+		period = sysctl_sched_min_granularity;
+		period *= nr_running;
+	}
+	// printf("\n\nxxxxxxxxxxxxxxxxxxxx:%lu\n\n",period);
+	return period;
+}
+
+static inline void update_load_add(struct load_weight *lw, unsigned long inc)
+{
+	lw->weight += inc;
+	lw->inv_weight = 0;
+}
+
+static u64 sched_slice( struct sched_entity *se)
+{
+	u64 slice = __sched_period(cfs->nr_running + !se->on_rq);
+
+		struct load_weight *load;
+		struct load_weight lw;
+
+		load = &cfs->load;
+
+		if (unlikely(!se->on_rq)) {
+			lw = cfs->load;
+
+			update_load_add(&lw, se->load.weight);
+			load = &lw;
+		}
+		slice = calc_delta_mine(slice, se->load.weight, load);
+	return slice;
+}
+
+static u64 sched_vslice( struct sched_entity *se)
+{
+	return calc_delta_fair(sched_slice( se), se);
+}
+
+
+
+static inline u64 min_vruntime(u64 min_vruntime, u64 vruntime)
+{
+	s64 delta = (s64)(vruntime - min_vruntime);
+	if (delta < 0)
+		min_vruntime = vruntime;
+
+	return min_vruntime;
+}
+
+static inline u64 max_vruntime(u64 min_vruntime, u64 vruntime)
+{
+	s64 delta = (s64)(vruntime - min_vruntime);
+	if (delta > 0)
+		min_vruntime = vruntime;
+
+	return min_vruntime;
+}
+
+static void update_min_vruntime()
+{
+	u64 vruntime = cfs->min_vruntime;
+
+	if (cfs->curr)
+		vruntime = cfs->curr->vruntime;
+
+	if (cfs->rb_leftmost) {
+		struct sched_entity *se = rb_entry(cfs->rb_leftmost, struct sched_entity, run_node);
+
+		if (!cfs->curr)
+			vruntime = se->vruntime;
+		else
+			vruntime = min_vruntime(vruntime, se->vruntime);
+	}
+
+	cfs->min_vruntime = max_vruntime(cfs->min_vruntime, vruntime);
+
+}
+
+
+static void update_curr(struct sched_entity *se) //更新当前线程信息
+{
+	u64 now = cfs->clock;
+	unsigned long delta_exec;
+
+	delta_exec = (unsigned long)(now - se->exec_start);
+	// printf("llllllllllllllllll:%lu\n\n",delta_exec);
+	unsigned long delta_exec_weighted;
+
+	se->sum_exec_runtime += delta_exec;
+	delta_exec_weighted = calc_delta_fair(delta_exec, se);
+
+	se->vruntime += delta_exec_weighted;
+	se->exec_start = now;
+
+	update_min_vruntime();	
+
+}
+
+
+static void entity_tick() //时钟中断调用
+{
+ update_curr(cfs->curr);
+
+}
+static void *main_thread()//主调度线程
+{
+	struct timeval t_start,t_end;
 	struct sched_entity *curr  = rb_entry(cfs->rb_leftmost, struct sched_entity, run_node);
-	
+	cfs->curr=curr;
 	struct sched_entity *left_node = curr;
+		
 	dequeue_entity(curr); //出队运行
+
 	while(1)
 	{
 
+	
 		left_node  = rb_entry(cfs->rb_leftmost, struct sched_entity, run_node);
-		if(left_node == 0)
+		if(cfs->nr_running == 0)
 			break;
 
-  // printf("mmmmmmmmmmmmmm:%lu\n ",curr->pid);
-		curr->key +=curr->setup;
+		update_cfsrq_clock();
+printf("mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm %llu %llu id: %lu nr:%d \n",cfs->curr->vruntime,left_node->vruntime,run_id,cfs->nr_running);
+		entity_tick();
+// printf("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n");
+		
+		// printf("curr->vruntime: %llu pid: %lu\nleft->vruntime: %llu left_node->pid:%lu\n\n ",cfs->curr->vruntime,curr->pid,left_node->vruntime,left_node->pid);	
 		
 	
-		if(left_node->key < curr->key)
+		if(left_node->vruntime + 150 <curr->vruntime)
 		{
+
+			// printf("vvvvvvvvvvvvvvvvvvvv: cfs->nr_running: %d %lu \n",cfs->nr_running,curr->pid);
 			if(thread_is_alive(curr->pid) )
 			{
 				enqueue_entity(curr); //如果进程退出，不用进队
-				// printf("ppppppppppppppppppppppp\n");
-				//清空curr指向的内存空间
+				 // printf("ppppppppppppppppppppppp\n");
 			}	
 			curr = left_node;
-			// printf("vvvvvvvvvvvvvvvvvvvv: cfs->nr_running: %d %lu \n",cfs->nr_running,curr->pid);
+			cfs->curr=curr;
 			dequeue_entity(curr);
+			// printf("hhhhhhhhhhhhhhhh\n");
 
 		}
 
@@ -138,7 +347,7 @@ void *main_thread()//主调度线程
 		run_id =curr->pid;
 		pthread_cond_broadcast(&cond);
 
-		usleep(TIME_TICK*2);//模拟每隔1ms触发一次时钟中断
+		usleep(1);//模拟每隔1000us左右触发一次时钟中断
 
 	}
 
@@ -154,7 +363,7 @@ printf("\n\n\nffffffffffffffffffffff %lu\n",run_id);
 
 
 
- void inc_nr_running()
+ void inc_nr_running()//增加队列等待线程的数量
 {
 	cfs->nr_running++;
 }
@@ -191,12 +400,16 @@ void init_thread_info(struct thread_struct *ready_thread,pthread_t id)
 	ready_thread->pid = id;
 	ready_thread->se.is_exit = 0;
 	ready_thread->se.pid = id;
-	ready_thread->se.static_prior=random(40);
-	ready_thread->se.weight = prio_to_weight[ready_thread->se.static_prior];
+	ready_thread->se.static_prio=random(40)+100;
+	set_load_weight(ready_thread);
+	ready_thread->se.weight = prio_to_weight[ready_thread->se.static_prio];
 	cfs->all_weight += ready_thread->se.weight;
-	ready_thread->se.setup = cal_setup(ready_thread->se.weight);
-	ready_thread->se.key=10000+random(311);
-	printf("bbbbbbbbbbbbbbbbbbbbbbbbbbb %2d %lu %lu %d %d\n",ready_thread->se.static_prior,id,ready_thread->se.weight,ready_thread->se.setup,ready_thread->se.key );
+	// ready_thread->se.setup = cal_setup(ready_thread->se.weight);
+	// ready_thread->se.key=10000+random(311);
+	ready_thread->se.on_rq=1;
+	ready_thread->se.sum_exec_runtime =0;
+	// printf("bbbbbbbbbbbbbbbbbbbbbbbbbbb %2d %lu %lu %d %d\n",ready_thread->se.static_prio,id,ready_thread->se.weight,ready_thread->se.setup,ready_thread->se.key );
+	printf("bbbbbbbbbbbbbbbbbbbbbbbbbbb  %d %lu %lu\n",ready_thread->se.static_prio,ready_thread->se.load.weight,ready_thread->se.load.inv_weight);
 }
 
 
@@ -204,23 +417,24 @@ void ready_run_thread(struct thread_struct *ready_thread,int *n) //准备运行�
 {
 	pthread_t id;	
 	srand((int)time(0));
-	// int *m=0;
 	while(ready_thread->pid != 1)
 	{	
 		int *m=(int *)malloc(sizeof(int));
-		*m = random(1000)+1000 ;
-		printf("m is %d\n",*m);
-		printf("poiner m is %p\n",m);
+		*m = random(1000)+9000 ;
 		int ret=pthread_create(&id,NULL,(void *)thread,m);
 		if(ret!=0){
-			printf ("Create pthread error!\n");
+			printf ("创建线程失败!\n");
 			exit (1);
 		}
 		init_thread_info(ready_thread,id);	
+		place_entity(&ready_thread->se, 1);  
+	printf("summmmmmmmm is id:%lu %llu\n",ready_thread->pid,ready_thread->se.vruntime);
+		enqueue_entity(&ready_thread->se);
 		ready_thread++;
 
 	}
-
+	// sleep(100);
+		printf("fffffffffffffffffffffffffffff\n");
 }
 
 	void dequeue_entity(struct sched_entity *se)
@@ -237,6 +451,27 @@ void ready_run_thread(struct thread_struct *ready_thread,int *n) //准备运行�
 	}
 
 
+static void place_entity( struct sched_entity *se, int initial)
+{
+	u64 vruntime = cfs->min_vruntime;
+
+	if (initial )//&& sched_feat(START_DEBIT)) //待修改
+		vruntime += sched_vslice( se);
+
+
+	// if (!initial) {
+	// 	unsigned long thresh = sysctl_sched_latency;
+
+	// 	if (sched_feat(GENTLE_FAIR_SLEEPERS))
+	// 		thresh >>= 1;
+
+	// 	vruntime -= thresh;
+	// }
+	
+	vruntime = max_vruntime(se->vruntime, vruntime);
+
+	se->vruntime = vruntime;
+}
 
 
 //将调度实体插入红黑树，在插入过程中缓存最左边的节点
@@ -253,7 +488,7 @@ void enqueue_entity(struct sched_entity *se ) //插入单个节点到红黑树
 		this = rb_entry(parent, struct sched_entity, run_node);
 
 
-		if ( (se->key - this->key) < 0  )
+		if ( entity_before(se,this) )
 		{
 			new = &parent->rb_left;
 		}
@@ -282,7 +517,6 @@ void insert_thread_group(struct thread_struct *thread_g)
 
 		enqueue_entity(&thread_g->se);
 		thread_g++;
-		//printf('dsfdsfsdfdsfdsfdssssslsm  \n');
 	}
 }
 
@@ -300,10 +534,14 @@ void insert_thread_group(struct thread_struct *thread_g)
 
 // }
 
-void init_cfs_rq()  
+void init_cfs_rq(struct cfs_rq *cfs_run)  //初始化cfs运行队列
 {
-
-
+	cfs=cfs_run;
+	cfs->tasks_timeline = RB_ROOT;
+	cfs->all_weight =0;
+	cfs->clock = 0;
+	cfs->min_vruntime = (u64)(-(1LL << 20));
+	cfs->nr_running=0; //队列初始化数量
 }
 
 
@@ -314,21 +552,18 @@ int main(void)
 	int size = 100;
 	int n =1000;
 	struct cfs_rq cfs_run;
-	cfs=&cfs_run;
-	cfs->tasks_timeline = RB_ROOT;
-	cfs->all_weight =0;
+	init_cfs_rq(&cfs_run);
 	struct rb_root *cfs_tree= &cfs->tasks_timeline;
-	struct thread_struct thread_group[10];
+	struct thread_struct thread_group[25];
 
-	cfs->nr_running=0; //队列初始化数量
 
-	init_thread(10,thread_group);
+	init_thread(25,thread_group);
 
 
 	ready_run_thread(thread_group,&n);
 
-	insert_thread_group(thread_group);
-	sleep(2);
+	// insert_thread_group(thread_group);
+	sleep(1);
 
 
 	 ret=pthread_create(&sched_id,NULL,(void *)main_thread,NULL); //初始化调度线程
