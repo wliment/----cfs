@@ -40,6 +40,9 @@ typedef long long   s64;
 #define WMULT_CONST (~0UL) 
 #define WMULT_SHIFT  32 
 #define LONG_MAX  ((long)(~0UL>>1))
+#define ENQUEUE_WAKEUP    1
+#define ENQUEUE_HEAD    2
+#define ENQUEUE_WAKING    4
 struct load_weight {
   unsigned long weight, inv_weight;
 };
