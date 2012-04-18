@@ -1,33 +1,14 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-// int main()
-// {
+  #include <ncurses.h> 
 
-// 	// long long *b=(long long *)malloc(sizeof(long long )*9999*9999*999);
-// 	// sleep(30);
-// 	// exit(0);
-// 	int a=0,n=96,m=0;
-// 	while(1)
-// 	{
-// 		printf("please input you number:");
-// 		scanf("%d",&a);
-// 		m = n+a;	
-// 		printf("the char is : %c\n",m);
+int main() 
+{ 
+   initscr();          /*  初 化，进入NCURSES 模式               */ 
+   printw("Hello World !!!"); /*  在虚拟屏幕上打印Hello, World!!!    */ 
+   refresh();          /*  将虚拟屏幕上的内容写到显示器上，并刷新  */ 
+	printw("sssssssssssssssssss");
+   refresh();          /*  将虚拟屏幕上的内容写到显示器上，并刷新  */ 
+   getch();            /*  等待用户输入                            */ 
+   endwin();           /*  退出NCURSES 模式                      */ 
 
-
-// 	}
-
-
-// }
-void GetMemory(char **p,int num)
-{
-*p=(char*)malloc(sizeof(char)*num);       //p是形参指向的地址
-}
-void main()
-{
-char *str=NULL;
-GetMemory(&str,100);                            //str是实参指向的地址，不能通过调用函数来申请内存
-strcpy(str,"hello");
-printf("sssssssssss %s %d \n",str,1 << 10);
-}
+	return 0; 
+} 

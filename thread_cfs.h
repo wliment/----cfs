@@ -73,7 +73,9 @@ struct sched_entity {
 	struct rb_node		run_node;
 	unsigned int		on_rq;  
   int key;
-  pthread_t pid;
+  pid_t p_pid;
+
+ pthread_t pid;
   int is_exit;
   int static_prio;
   int setup;
@@ -87,7 +89,7 @@ struct sched_entity {
 
 struct thread_struct { 
 
- pthread_t pid;
+ pid_t pid;
  struct sched_entity se; 
 //struct sched_class *sched_class;
 
