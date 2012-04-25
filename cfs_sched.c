@@ -1,4 +1,5 @@
 #include "rbtree_rc.h" 
+#include <gtk/gtk.h>
 #include "thread_cfs.h"
 #include <stdio.h>
 #include <string.h>
@@ -713,6 +714,47 @@ static void *tree_to_image() //将二叉树输出为文件，独立线程不对�
 	fclose(dot_gv);
 }
 
+void
+hello (void)
+{
+  g_print ("Hello World\n");
+}
+
+void
+destroy (void)
+{
+  gtk_main_quit ();
+}
+
+
+void *gtk (int argc, char *argv[])
+{
+  GtkWidget *window;
+  GtkWidget *button;
+
+  gtk_init (&argc, &argv);
+
+  window = gtk_window_new (GTK_WINDOW_TOPLEVEL);
+  gtk_signal_connect (GTK_OBJECT (window), "destroy",
+		      GTK_SIGNAL_FUNC (destroy), NULL);
+  gtk_container_border_width (GTK_CONTAINER (window), 10);
+
+  button = gtk_button_new_with_label ("Hello World");
+
+  gtk_signal_connect (GTK_OBJECT (button), "clicked",
+		      GTK_SIGNAL_FUNC (hello), NULL);
+  gtk_signal_connect_object (GTK_OBJECT (button), "clicked",
+			     GTK_SIGNAL_FUNC (gtk_widget_destroy),
+			     GTK_OBJECT (window));
+  gtk_container_add (GTK_CONTAINER (window), button);
+  gtk_widget_show (button);
+
+  gtk_widget_show (window);
+
+  gtk_main ();
+
+  return 0;
+}
 int main(int argc,char *argv[])
 {
 	pthread_t sched_id,dot_id;
@@ -746,6 +788,12 @@ int main(int argc,char *argv[])
 		}
 
  	ret=pthread_create(&dot_id,NULL,(void *)tree_to_image,NULL); 	
+ 	if(ret!=0){
+			printf ("Create pthread error!\n");
+			exit (1);
+		}
+
+ 	ret=pthread_create(&dot_id,NULL,(void *)gtk,NULL); 	
  	if(ret!=0){
 			printf ("Create pthread error!\n");
 			exit (1);
