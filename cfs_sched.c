@@ -1,15 +1,5 @@
-#include "rbtree_rc.h" 
-#include <gtk/gtk.h>
 #include "thread_cfs.h"
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <pthread.h>
-#include <sys/time.h>
-#include <time.h>
-#include <errno.h>
-#include <gvc.h>
+
 #define random(x) (rand()%x)
 
 //优先级到权重转换数组
@@ -38,15 +28,8 @@ static const u32 prio_to_wmult[40] = {
 
 
 
-#define MAX_USER_RT_PRIO	100  //最大用户实时优先级
-#define MAX_RT_PRIO		MAX_USER_RT_PRIO
-#define NICE_0_LOAD		1024
-#define NICE_TO_PRIO(nice)	(MAX_RT_PRIO + (nice) + 20)
-#define PRIO_TO_NICE(prio)	((prio) - MAX_RT_PRIO - 20)
-#define TASK_NICE(p)		PRIO_TO_NICE((p)->static_prio)
-
 static pthread_mutex_t mtx = PTHREAD_MUTEX_INITIALIZER ;
-static pthread_mutex_t cfs_tree_mtx = PTHREAD_MUTEX_INITIALIZER ;
+pthread_mutex_t cfs_tree_mtx = PTHREAD_MUTEX_INITIALIZER ;
 static pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
 
 unsigned int sysctl_sched_latency = 6000ULL; //单位微秒,最小调度周期6ms
@@ -322,7 +305,7 @@ static void update_curr(struct sched_entity *se) //更新当前线程信息
 	se->sum_exec_runtime += delta_exec; //实际运行时间
 	delta_exec_weighted = calc_delta_fair(delta_exec, se);
 	se->vruntime += delta_exec_weighted;
-	printf("xxxxxxxxxxxxxxxxxxxxxxx delta:%lu se->vruntime:%llu prio:%d  run_id:%lu\n",delta_exec_weighted,se->vruntime,se->static_prio,run_id);
+	/*printf("xxxxxxxxxxxxxxxxxxxxxxx delta:%lu se->vruntime:%llu prio:%d  run_id:%lu\n",delta_exec_weighted,se->vruntime,se->static_prio,run_id);*/
 	// if(se->vruntime > 100000000)
 	// 	exit(1);
 	se->exec_start = now;
@@ -413,9 +396,9 @@ static void *main_thread()//主调度线程
 		
 		// printf("curr->vruntime: %llu pid: %lu\nleft->vruntime: %llu left_node->pid:%lu\n\n ",cfs->curr->vruntime,curr->pid,left_node->vruntime,left_node->pid);	
 		
-			printf("min_vvvvvvvvvvvvvvv: %llu %lu\n",cfs->min_vruntime,run_id);
+			/*printf("min_vvvvvvvvvvvvvvv: %llu %lu\n",cfs->min_vruntime,run_id);*/
 	
-		if(check_preempt_tick(cfs->curr) )
+		if(check_preempt_tick(cfs->curr))
 		{
 
 			// printf("vvvvvvvvvvvvvvvvvvvv: \n");
@@ -424,6 +407,8 @@ static void *main_thread()//主调度线程
 			cfs->curr=__pick_first_entity(cfs);
 			update_stats_curr_start(cfs->curr);
 				// printf("jjjjjjjjjjjjjjjjjjjjjjj curr->vruntime %llu  curr_id: %lu\n",cfs->curr->vruntime,cfs->curr->pid);
+      get_sched_info(cfs->curr,prev) ;
+      /*printf("currid:%lu prev_id%lu\n",cfs->curr->p_pid,prev->p_pid);*/
 			if(thread_is_alive(prev->pid) )
 			{
 				// printf("mmmmmmmmmmmmmmm curr->vruntime:%llu curr->pid:%lu %d\n ",curr->vruntime,curr->pid,cfs->nr_running); 
@@ -431,13 +416,14 @@ static void *main_thread()//主调度线程
 				update_load_add(&cfs->load,prev->load.weight);
 				cfs->nr_running++;
 			}	
-
-
+      else{
+            put_exit_info(prev);
+       /*put_sched_info(prev,cfs->curr) ;*/
+      }
 			dequeue_entity(cfs->curr);
 			curr = cfs->curr;
 		}
 
-				
 	
 		run_id =cfs->curr->pid;
 				   // printf("ooooooooooooooooooooooo %lu\n",run_id);
@@ -500,10 +486,11 @@ int get_thread_pid(pthread_t t_pid)
 
 
 //初始化线程调度实体信息
-void init_thread_info(struct thread_struct *ready_thread,pthread_t id)
+void init_thread_info(struct thread_struct *ready_thread,pthread_t id,int num)
 {
 	struct sched_entity *curr = &ready_thread->se;
 	ready_thread->pid = id;
+  curr->cal_num = num;
 	curr->pid = id;
 	curr->p_pid = ++now_id;
 	curr->static_prio=random(40)+100;
@@ -516,6 +503,7 @@ void init_thread_info(struct thread_struct *ready_thread,pthread_t id)
 	curr->exec_start=0;
 	// printf("bbbbbbbbbbbbbbbbbbbbbbbbbbb %2d %lu %lu %d %d\n",curr->static_prio,id,curr->weight,curr->setup,curr->key );
 	printf("bbbbbbbbbbbbbbbbbbbbbbbbbbb  %d %lu %lu\n",curr->static_prio,curr->load.weight,curr->load.inv_weight);
+  put_init_info(curr);
 }
 
 
@@ -526,13 +514,13 @@ void ready_run_thread(struct thread_struct *ready_thread,int *n) //准备运行�
 	while(ready_thread->pid != 1)
 	{	
 		int *m=(int *)malloc(sizeof(int));
-		*m = random(1000)+9000;
+		*m = random(9000)+1000;
 		int ret=pthread_create(&id,NULL,(void *)thread,m);
 		if(ret!=0){
 			printf ("创建线程失败: %s\n",strerror(ret));
 			exit (1);
 		}
-		init_thread_info(ready_thread,id);	
+		init_thread_info(ready_thread,id,*m);	
 		enqueue_entity(&ready_thread->se,1);
 	 printf("summmmmmmmm is id:%lu %llu %llu\n",ready_thread->pid,ready_thread->se.vruntime,ready_thread->se.sum_exec_runtime);
 		ready_thread++;
@@ -672,89 +660,26 @@ void usage()
 	printf("  用法:\n\t./cfs n   n=你要运行的线程数\n\n");
 }
 
-int dot_to_image(FILE *dot_gv)
+void on_button3_clicked()
 {
-	GVC_t  *gvc;  
-	graph_t *g;  
-	FILE *image;
-	gvc = gvContext(); 
-	g = agread(dot_gv); 
-	image = fopen("test.svg","w+");
-	gvLayout(gvc, g, "dot"); 
-	gvRender(gvc, g, "svg",image); 
-	gvFreeLayout(gvc, g); 
+  struct thread_struct *pc = calloc(sizeof(struct thread_struct) , 1);
+   pthread_t id; 
+	srand((int)time(0));
+		int *m=(int *)malloc(sizeof(int));
+		*m = random(1000)+9000;
+		int ret=pthread_create(&id,NULL,(void *)thread,m);
+		if(ret!=0){
+			printf ("创建线程失败: %s\n",strerror(ret));
+			exit (1);
+		}
+		init_thread_info(pc,id,*m);	
+    pc->se.run_node.new=1;
 
-	agclose(g); 
-
-	fclose(image);
-
-	return (gvFreeContext(gvc)); 
+		enqueue_entity(&pc->se,1);
 
 }
 
-extern void bst_print_dot(struct rb_root* root, FILE* stream);
-static void *tree_to_image() //将二叉树输出为文件，独立线程不对调度产生影响
-{
 
-	FILE *dot_gv;
-	dot_gv = fopen("dot.gv","w+");
-//每隔一秒生成一次图片
-	while(cfs->nr_running !=0) 
-	{
-		sleep(1);
-		pthread_mutex_lock(&cfs_tree_mtx);
-		bst_print_dot(&cfs->tasks_timeline,dot_gv);
-		pthread_mutex_unlock(&cfs_tree_mtx);
-		rewind(dot_gv);
-		dot_to_image(dot_gv);
-		ftruncate(fileno(dot_gv), 0);
-		rewind(dot_gv);
-		sleep(1);
-	}
-	fclose(dot_gv);
-}
-
-void
-hello (void)
-{
-  g_print ("Hello World\n");
-}
-
-void
-destroy (void)
-{
-  gtk_main_quit ();
-}
-
-
-void *gtk (int argc, char *argv[])
-{
-  GtkWidget *window;
-  GtkWidget *button;
-
-  gtk_init (&argc, &argv);
-
-  window = gtk_window_new (GTK_WINDOW_TOPLEVEL);
-  gtk_signal_connect (GTK_OBJECT (window), "destroy",
-		      GTK_SIGNAL_FUNC (destroy), NULL);
-  gtk_container_border_width (GTK_CONTAINER (window), 10);
-
-  button = gtk_button_new_with_label ("Hello World");
-
-  gtk_signal_connect (GTK_OBJECT (button), "clicked",
-		      GTK_SIGNAL_FUNC (hello), NULL);
-  gtk_signal_connect_object (GTK_OBJECT (button), "clicked",
-			     GTK_SIGNAL_FUNC (gtk_widget_destroy),
-			     GTK_OBJECT (window));
-  gtk_container_add (GTK_CONTAINER (window), button);
-  gtk_widget_show (button);
-
-  gtk_widget_show (window);
-
-  gtk_main ();
-
-  return 0;
-}
 int main(int argc,char *argv[])
 {
 	pthread_t sched_id,dot_id;
@@ -762,9 +687,8 @@ int main(int argc,char *argv[])
 	int size = 100;
 	int n =1000;
 	int t_nu=0;
-   	int main_id=getpid(); 
-   	printf("mmmmmmmmmmmmmmmmmmmmindididid %d\n",main_id );
-   	now_id=main_id;
+  int main_id=getpid(); 
+  now_id=main_id;
 	 if( argc ==1 || argc> 2 )
 	{
 		usage();
@@ -772,34 +696,28 @@ int main(int argc,char *argv[])
 	}
 	else
 		t_nu=atoi(argv[1]);
-
+  sched_info_str_buffer = fopen("sched_file.txt","w+");
+  sched_output = fopen("sched_file.txt","r");
 	init_cfs_rq();
 	struct rb_root *cfs_tree= &cfs->tasks_timeline;
 	struct thread_struct thread_group[t_nu];
-	init_thread(t_nu,thread_group);
-
-	ready_run_thread(thread_group,&n);
-	// sleep(1);
-
-	 ret=pthread_create(&sched_id,NULL,(void *)main_thread,NULL); //初始化调度线程
-		if(ret!=0){
-			printf ("Create pthread error!\n");
-			exit (1);
-		}
-
- 	ret=pthread_create(&dot_id,NULL,(void *)tree_to_image,NULL); 	
- 	if(ret!=0){
-			printf ("Create pthread error!\n");
-			exit (1);
-		}
 
  	ret=pthread_create(&dot_id,NULL,(void *)gtk,NULL); 	
  	if(ret!=0){
 			printf ("Create pthread error!\n");
 			exit (1);
 		}
-		printf("xxxxxxxxxxxx\n");
-   pthread_join(sched_id,NULL);
-   // pthread_join(dot_id,NULL);
+  sleep(1);
+	init_thread(t_nu,thread_group);
+	ready_run_thread(thread_group,&n);
+  sleep(1);
+
+   ret=pthread_create(&sched_id,NULL,(void *)main_thread,NULL); //初始化调度线程
+    if(ret!=0){
+      printf ("Create pthread error!\n");
+      exit (1);
+    }
+
+   pthread_join(dot_id,NULL);
 
 }

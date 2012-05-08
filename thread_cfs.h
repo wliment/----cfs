@@ -1,8 +1,15 @@
 #include "rbtree.h"
 #include "rbtree_rc.h"
-
+#include <gtk/gtk.h>
+#include <glade/glade.h>
+#include <pthread.h> #include <stddef.h> #include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <unistd.h>
 #include <pthread.h>
-#include <stddef.h>
+#include <sys/time.h>
+#include <time.h>
+#include <errno.h>
 
 typedef unsigned char   u8;
 typedef unsigned short  u16;
@@ -43,6 +50,15 @@ typedef long long   s64;
 #define ENQUEUE_WAKEUP    1
 #define ENQUEUE_HEAD    2
 #define ENQUEUE_WAKING    4
+
+#define MAX_USER_RT_PRIO	100  //最大用户实时优先级
+#define MAX_RT_PRIO		MAX_USER_RT_PRIO
+#define NICE_0_LOAD		1024
+#define NICE_TO_PRIO(nice)	(MAX_RT_PRIO + (nice) + 20)
+#define PRIO_TO_NICE(prio)	((prio) - MAX_RT_PRIO - 20)
+#define TASK_NICE(p)		PRIO_TO_NICE((p)->static_prio)
+
+
 struct load_weight {
   unsigned long weight, inv_weight;
 };
@@ -69,10 +85,11 @@ struct cfs_rq
 
 struct sched_entity { 
 
-	struct load_weight	load;		/* for load-balancing */
+	struct load_weight	load;		
 	struct rb_node		run_node;
 	unsigned int		on_rq;  
   int key;
+  int cal_num;//计算步数
   pid_t p_pid;
 
  pthread_t pid;
@@ -88,10 +105,37 @@ struct sched_entity {
 };
 
 struct thread_struct { 
-
  pid_t pid;
  struct sched_entity se; 
 //struct sched_class *sched_class;
 
 };
+pthread_mutex_t cfs_tree_mtx ;
+extern int if_output_tree;
+
+extern int *tree_to_image(); //将二叉树输出为文件，独立线程不对调度产生影响
+extern void *gtk (int argc, char *argv[]);
+extern void put_exit_info(struct sched_entity *se);
+extern void get_sched_info(struct sched_entity *prev,struct sched_entity *curr);
+
+extern void put_init_info(struct sched_entity *se);
+extern GtkTextBuffer *info_area;
+extern GtkTextTag *tag;
+extern GtkTextTag *blue_tag;
+extern GtkScrolledWindow *swindow;
+
+extern GtkTextBuffer *sched_info_area;
+extern GtkScrolledWindow *sched_swindow;
+extern GtkTextView *sched_textview;
+
+
+
+extern FILE *sched_info_str_buffer; 
+extern FILE *sched_output; 
+
+extern GtkTextBuffer *init_info_area;
+extern GtkTextView  *init_textview;
+
+extern struct cfs_rq *cfs; //等待进程队列
+
 

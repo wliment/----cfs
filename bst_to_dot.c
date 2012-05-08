@@ -16,10 +16,16 @@ void get_node_color(struct rb_node* node,struct sched_entity *cont,FILE* stream)
 
 	printf("\n");
 	printf("color is :%lu\n",rb_color(node));
+
+	if(node->new == 1)
+  {
+		fprintf(stream, "    %d [shape=circle,fixedsize=true,fontcolor=red,fontsize=12,color=green,fontcolor=white,style=filled];\n", cont->p_pid);
+    return;
+  }
 	if(rb_color(node))
-		fprintf(stream, "    %d [shape=circle,fixedsize=false ,fontcolor=red,fontsize=14,color=black,fontcolor=white,style=filled];\n", cont->p_pid);
+		fprintf(stream, "    %d [shape=circle,fixedsize=true,fontcolor=red,fontsize=12,color=black,fontcolor=white,style=filled];\n", cont->p_pid);
 	else
-		fprintf(stream, "    %d [shape=circle,fixedsize=false,color=red,fontsize=14,style=filled];\n", cont->p_pid);
+		fprintf(stream, "    %d [shape=circle,fixedsize=true,color=red,fontsize=12,style=filled];\n", cont->p_pid);
 
 }
 void bst_print_dot_aux(struct rb_node* node, FILE* stream)
@@ -60,7 +66,8 @@ void bst_print_dot_aux(struct rb_node* node, FILE* stream)
 extern void bst_print_dot(struct rb_root* root, FILE* stream)
 {
 	fprintf(stream, "digraph red_black_tree {\n");
-	fprintf(stream, "size=\"1000,1000\"\n");
+  fprintf(stream, "size=\"1000,800\"  bgcolor=\"#f0ebe2\"\n");
+	/*fprintf(stream, "size=\"1000,800\"  bgcolor=\"#3BFF00\"\n");*/
 	fprintf(stream, "    node [fontname=\"Arial\"];\n");
 
 
