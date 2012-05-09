@@ -1,7 +1,5 @@
 #include "thread_cfs.h"
 
-#define random(x) (rand()%x)
-
 //优先级到权重转换数组
 static const int prio_to_weight[40] = { 
  /* -20 */     88761,     71755,     56483,     46273,     36291,
@@ -660,24 +658,6 @@ void usage()
 	printf("  用法:\n\t./cfs n   n=你要运行的线程数\n\n");
 }
 
-void on_button3_clicked()
-{
-  struct thread_struct *pc = calloc(sizeof(struct thread_struct) , 1);
-   pthread_t id; 
-	srand((int)time(0));
-		int *m=(int *)malloc(sizeof(int));
-		*m = random(1000)+9000;
-		int ret=pthread_create(&id,NULL,(void *)thread,m);
-		if(ret!=0){
-			printf ("创建线程失败: %s\n",strerror(ret));
-			exit (1);
-		}
-		init_thread_info(pc,id,*m);	
-    pc->se.run_node.new=1;
-
-		enqueue_entity(&pc->se,1);
-
-}
 
 
 int main(int argc,char *argv[])

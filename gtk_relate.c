@@ -37,37 +37,46 @@ void put_init_info(struct sched_entity *se)
  char str[100];
  sprintf(str,"进程[ %5d ]: 优先级: %4d  运算数: %5d 权重: %8lu\n",se->p_pid,PRIO_TO_NICE(se->static_prio),se->cal_num,se->load.weight);
  printf(str);
- gdk_threads_enter();
+
+
  GtkTextIter iter;
+
  gtk_text_buffer_get_iter_at_offset(init_info_area, &iter, 0);
+
+  g_print("ssssssssssssssssssssssssssn\n");
+
  gtk_text_buffer_insert_with_tags(init_info_area, &iter,str,strlen(str),blue_tag,NULL);
- gdk_threads_leave();
 
 
+  g_print("nnnnnnnnnnnnnnnnnnnnnnnnnnnn\n");
 }
 void  put_exit_info(struct sched_entity *se) //输出进程退出信息
 {
-gdk_threads_enter();
   char str[50];
   GtkAdjustment *hscroll;
   sprintf(str,"进程[ %5d ]已经运行完成",se->p_pid);
   GtkTextIter iii;
+
   gtk_text_buffer_get_iter_at_offset( info_area, &iii, -1);
+gdk_threads_enter();
   gtk_text_buffer_insert_with_tags(info_area, &iii,str,strlen(str),tag,NULL);
 
+gdk_threads_leave();
   sprintf(str,"\t进程优先级:%4d\t运算步数: %5d\n",PRIO_TO_NICE(se->static_prio),se->cal_num);
   gtk_text_buffer_get_iter_at_offset( info_area, &iii, -1);
+
+gdk_threads_enter();
+  gtk_text_buffer_insert_with_tags(info_area, &iii,str,strlen(str),tag,NULL);
   gtk_text_buffer_insert_with_tags(info_area, &iii,str,strlen(str),blue_tag,NULL);
+gdk_threads_leave();
 
   GtkTextMark *mark = NULL;
   GtkTextIter iter_start;
   GtkTextIter iter_end;
   gtk_text_buffer_get_bounds(info_area, &iter_start, &iter_end);
   mark = gtk_text_buffer_create_mark(info_area, NULL, &iter_end, FALSE);
- while (gtk_events_pending ())
-  gtk_main_iteration ();
+ 
   gtk_text_view_scroll_mark_onscreen(textview2, mark);
-gdk_threads_leave();
 }
 
 void get_sched_info(struct sched_entity *prev,struct sched_entity *curr)//输出调度信息
@@ -88,7 +97,6 @@ int put_sched_info()
        return 0;
   }
 
-  gdk_threads_enter();
   /*fseek(sched_info_str_buffer, 0L, SEEK_END ); //获取调度信息中的内容*/
   int size =57*1000;
   char *text=(char*)malloc(size);
@@ -99,13 +107,17 @@ printf("bbbbbbbbbbbbbbbbbbbbbbbbb %d\n",strlen(text));
   /*gtk_text_buffer_delete (sched_info_area,&start,&end);*/
 
   gtk_text_buffer_get_iter_at_offset(sched_info_area, &end, -1); //插入缓冲区
+
+  gdk_threads_enter();
   gtk_text_buffer_insert_with_tags(sched_info_area, &end,text,size,tag,NULL);
+  gdk_threads_leave();
   GtkTextMark *mark = NULL;
 
   gtk_text_buffer_get_bounds(sched_info_area, &start, &end);
   mark = gtk_text_buffer_create_mark(sched_info_area, NULL, &end, FALSE);
+
+  gdk_threads_enter();
   gtk_text_view_scroll_mark_onscreen(sched_textview, mark);
-     
   gdk_threads_leave();
   free(text);
   return 1;
@@ -120,9 +132,12 @@ void update_info(struct status_update_info *sui)
   }
   gchar *str;
 	str = g_strdup_printf ("%d", cfs->nr_running);
+
+  gdk_threads_enter();
   gtk_label_set_text(GTK_LABEL(sui->cfs_nrruning),str);
 	str = g_strdup_printf ("%llu", cfs->min_vruntime);
   gtk_label_set_text(GTK_LABEL(sui->min_vruntime),str);
+  gdk_threads_leave();
 	g_free (str);
   return 1;
 }
@@ -158,6 +173,27 @@ gtk_window_set_resizable (GTK_WINDOW(iu->image_window), FALSE);
 
 }
 
+void on_random_button_clicked()
+{
+
+  struct thread_struct *pc = calloc(sizeof(struct thread_struct) , 1);
+   pthread_t id;
+  srand((int)time(0));
+    int *m=(int *)malloc(sizeof(int));
+    *m = random(1000)+9000;
+    int ret=pthread_create(&id,NULL,(void *)thread,m);
+    if(ret!=0){
+      printf ("创建线程失败: %s\n",strerror(ret));
+      exit (1);
+    }
+
+    init_thread_info(pc,id,*m);	
+
+    pc->se.run_node.new=1;
+
+    enqueue_entity(&pc->se,1);
+
+}
 void *gtk (int argc, char *argv[]) //图形界面主线程
 {
   GtkBuilder *builder;
@@ -169,10 +205,10 @@ void *gtk (int argc, char *argv[]) //图形界面主线程
   GtkTextTagTable *tag_table;
 
   GtkTextIter iter;
-
-  g_thread_init(NULL);
-  gtk_init (&argc, &argv);
+  if (!g_thread_supported()) 
+    g_thread_init(NULL);
   gdk_threads_init();
+  gtk_init (&argc, &argv);
 
   builder = gtk_builder_new();
 
@@ -220,6 +256,7 @@ sui.min_vruntime = min_vruntime;
 
 
 
+//红黑树图片
 struct image_update iu;
 GtkToggleButton *toggleBtn;
 GtkWindow *image_window;
@@ -229,22 +266,24 @@ iu.image_window = GTK_WIDGET(gtk_builder_get_object(builder,"rbtree_image"));
 iu.image  = GTK_WIDGET(gtk_builder_get_object(builder,"image1"));
 g_signal_connect( G_OBJECT(toggleBtn), "toggled", G_CALLBACK(on_togglebutton1_toggled),&iu);
 
+GtkWidget *random_create_btn = GTK_WIDGET(gtk_builder_get_object(builder,"random_create"));
+g_signal_connect( G_OBJECT(random_create_btn), "clicked", G_CALLBACK(on_random_button_clicked),NULL);
+
 
 g_signal_connect (window, "destroy", G_CALLBACK (gtk_widget_destroyed), &window);
 
   /*gtk_text_buffer_insert_with_tags(sched_info_area, &iter,"sdfsdfsdfsdfsdfsdfsdf\n",-1,tag,NULL);*/
- /*g_signal_connect( G_OBJECT(button), "clicked", G_CALLBACK(on_button3_clicked),NULL);*/
 /*char *sss="进程[ 23181 ]被换入 <--> 进程［ 23194 ]被换出\n";*/
 /*printf("mmmmmmmmmmmmmmmmm:%d\n",strlen(sss));*/
   gtk_builder_connect_signals(builder, NULL);
   sleep(1);
-  /*g_timeout_add(100, (GSourceFunc) update_cfs_tree, (gpointer)image);*/
   g_timeout_add(1000, (GSourceFunc) put_sched_info, NULL);
-  g_timeout_add(200, (GSourceFunc)update_info,&sui);
+  g_timeout_add(400, (GSourceFunc)update_info,&sui);
   g_object_unref(G_OBJECT(builder));
   gtk_widget_show_all (window);
 
+ gdk_threads_enter();
   gtk_main ();
-
+ gdk_threads_leave();
   return 0;
 }

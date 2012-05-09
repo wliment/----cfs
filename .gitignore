@@ -2,3 +2,4 @@
 cfs
 *.swp
 tags
+./sched_file.txt

@@ -20,6 +20,9 @@ typedef short     s16;
 typedef int     s32;
 typedef long long   s64;
 
+
+#define random(x) (rand()%x)
+
 #define run_body(id) \
   pthread_mutex_lock(&mtx);\
         while(x!=0)\
@@ -113,6 +116,8 @@ struct thread_struct {
 pthread_mutex_t cfs_tree_mtx ;
 extern int if_output_tree;
 
+extern void init_thread_info(struct thread_struct *ready_thread,pthread_t id,int num);
+extern void *thread(int *nn);
 extern int *tree_to_image(); //将二叉树输出为文件，独立线程不对调度产生影响
 extern void *gtk (int argc, char *argv[]);
 extern void put_exit_info(struct sched_entity *se);
